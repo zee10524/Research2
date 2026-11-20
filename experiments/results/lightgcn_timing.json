@@ -1,0 +1,9 @@
+{
+  "seed": 42,
+  "epochs_run": 3,
+  "sec_per_epoch": 148.24466163333304,
+  "total_train_seconds": 444.7343510999999,
+  "n_params": 623744,
+  "threads": 8,
+  "best_epoch": 3
+}

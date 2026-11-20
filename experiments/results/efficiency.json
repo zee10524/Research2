@@ -1,0 +1,69 @@
+{
+  "machine": {
+    "cpu": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "logical_cores": 12,
+    "torch_threads": 2,
+    "ram_gb": 15.7,
+    "torch": "2.15.0+cpu",
+    "device": "cpu"
+  },
+  "projection_training": {
+    "trainable_params": 4096,
+    "steps": 10000,
+    "batch": 1024,
+    "seconds_mean": 13.717261266666355,
+    "seconds_std": 0.2994976403660891,
+    "rss_increase_mb": 81.7109375
+  },
+  "hybrid_item_matrix_build_ms": 0.22286599998551537,
+  "static_item_matrix_build_ms": 0.6530519999250828,
+  "inference_full_ranking_top100": {
+    "LightGCN": {
+      "all_users_seconds": 0.2222754400001577,
+      "std": 0.00495140929267013,
+      "ms_per_user": 0.03680056953644995
+    },
+    "LightGCN + L2": {
+      "all_users_seconds": 0.2225925600001574,
+      "std": 0.00570185941986643,
+      "ms_per_user": 0.03685307284770818
+    },
+    "Static Hybrid": {
+      "all_users_seconds": 0.21884996000007959,
+      "std": 0.006161401002713882,
+      "ms_per_user": 0.036233437086105894
+    },
+    "Projection Hybrid": {
+      "all_users_seconds": 0.21995932000008905,
+      "std": 0.0019136847078970668,
+      "ms_per_user": 0.036417105960279646
+    }
+  },
+  "n_users_ranked": 6040,
+  "n_test_users": 6040,
+  "memory_mb": {
+    "user_embeddings_6040x64_f32": 1.474609375,
+    "item_embeddings_3706x64_f32": 0.90478515625,
+    "bert_items_3706x64_f32 (training of W_P only)": 0.90478515625,
+    "W_P_64x64_f32": 0.015625,
+    "serving_total (users + one fused item matrix)": 2.37939453125,
+    "bert_items_3706x768_f32 (before random projection)": 10.857421875,
+    "bert_base_weights_f32 (offline encoding only)": 417.6416015625,
+    "process_peak_rss": 751.40234375
+  },
+  "parameters": {
+    "LightGCN (trainable)": 623744,
+    "Static Hybrid (trainable)": 0,
+    "Projection Hybrid (trainable, on top of frozen LightGCN)": 4096,
+    "BERT-base (frozen)": 109482240
+  },
+  "lightgcn_training": {
+    "seed": 42,
+    "epochs_run": 3,
+    "sec_per_epoch": 148.24466163333304,
+    "total_train_seconds": 444.7343510999999,
+    "n_params": 623744,
+    "threads": 8,
+    "best_epoch": 3
+  }
+}

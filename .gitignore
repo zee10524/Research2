@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+experiments/results/bert_fields_partial.npz
+# 64 MB, regenerate with experiments/encode_fields.py
+Embeddings/bert_fields_768.npz

@@ -1,0 +1,136 @@
+"""LightGCN re-training for additional seeds and for the efficiency table.
+
+Same model and hyper-parameters as LightGcn_implementation.ipynb (d=64, 3 layers, Adam
+lr 1e-3, batch 4096, L2 1e-5 on ego embeddings, 5 uniform negatives per positive, one full
+graph propagation per batch). Negative sampling is vectorised.
+
+val_split.csv is not in the repository, so the notebook's early stopping on validation
+HR@20 cannot be replayed. If ../val_split.csv exists it is used (best epoch by HR@20,
+checked every 5 epochs); otherwise the model after the last epoch is kept.
+
+Usage: python train_lightgcn.py --seed 1 --epochs 200 [--time-only 3]
+"""
+import argparse
+import time
+
+import numpy as np
+import pandas as pd
+import scipy.sparse as sp
+import torch
+
+from common import EMB, ROOT, evaluate, load_data, per_user, save_json, set_threads, topk
+
+
+def norm_adj(d):
+    r = sp.coo_matrix((np.ones(len(d.train), np.float32), (d.train.user.values, d.train.item.values)),
+                      shape=(d.n_users, d.n_items)).tocsr()
+    a = sp.bmat([[None, r], [r.T, None]], format="csr")
+    deg = np.asarray(a.sum(1)).ravel()
+    dinv = np.where(deg > 0, np.power(np.maximum(deg, 1e-12), -0.5), 0.0)
+    a = (sp.diags(dinv) @ a @ sp.diags(dinv)).tocoo()
+    return torch.sparse_coo_tensor(np.vstack([a.row, a.col]), a.data.astype(np.float32), a.shape).coalesce()
+
+
+def propagate(adj, emb, n_layers):
+    out, cur = [emb], emb
+    for _ in range(n_layers):
+        cur = adj @ cur
+        out.append(cur)
+    return torch.stack(out, 1).mean(1)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--epochs", type=int, default=200)
+    ap.add_argument("--time-only", type=int, default=0, help="run N epochs, report timing, save nothing")
+    ap.add_argument("--threads", type=int, default=6)
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    args = ap.parse_args()
+    set_threads(args.threads)
+    dev = torch.device(args.device)
+    if dev.type == "cuda":
+        torch.cuda.manual_seed(args.seed)
+        print("device:", torch.cuda.get_device_name(0), flush=True)
+    torch.manual_seed(args.seed)
+    rng = np.random.default_rng(args.seed)
+    dim, layers, lr, bs, reg, n_neg = 64, 3, 1e-3, 4096, 1e-5, 5
+
+    d = load_data()
+    adj = norm_adj(d)
+    adj = adj.to(dev) if dev.type == "cuda" else adj.to_sparse_csr()
+    emb = torch.nn.Parameter(torch.empty(d.n_users + d.n_items, dim, device=dev))
+    torch.nn.init.xavier_uniform_(emb[: d.n_users])
+    torch.nn.init.xavier_uniform_(emb[d.n_users:])
+    opt = torch.optim.Adam([emb], lr=lr)
+    pairs = d.train[["user", "item"]].values.astype(np.int64)
+
+    val_gt = None
+    if (ROOT / "val_split.csv").exists() and not args.time_only:
+        v = pd.read_csv(ROOT / "val_split.csv")
+        val_gt = np.zeros_like(d.train_mask)
+        val_gt[v.user.values, v.item.values] = True
+    best, best_state, best_epoch = -1.0, None, 0
+
+    epochs = args.time_only or args.epochs
+    times, t_start = [], time.perf_counter()
+    for ep in range(1, epochs + 1):
+        t0 = time.perf_counter()
+        perm = rng.permutation(len(pairs))
+        tot, nb = 0.0, max(1, len(pairs) // bs)
+        for b in range(nb):
+            u, p = pairs[perm[b * bs:(b + 1) * bs]].T
+            neg = rng.integers(0, d.n_items, (len(u), n_neg))
+            bad = d.train_mask[u[:, None], neg]
+            while bad.any():
+                neg[bad] = rng.integers(0, d.n_items, int(bad.sum()))
+                bad = d.train_mask[u[:, None], neg]
+            u_t, p_t, n_t = (torch.from_numpy(x).to(dev) for x in (u, p, neg))
+            full = propagate(adj, emb, layers)
+            ue, ie = full[: d.n_users], full[d.n_users:]
+            pos = (ue[u_t] * ie[p_t]).sum(1, keepdim=True)
+            negs = (ue[u_t].unsqueeze(1) * ie[n_t]).sum(2)
+            bpr = -torch.log(torch.sigmoid(pos - negs) + 1e-10).mean()
+            ego_u, ego_i = emb[: d.n_users], emb[d.n_users:]
+            l2 = reg * (ego_u[u_t].pow(2).sum() + ego_i[p_t].pow(2).sum() + ego_i[n_t].pow(2).sum()) / len(u)
+            loss = bpr + l2
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            tot += loss.item()
+        times.append(time.perf_counter() - t0)
+        msg = f"seed {args.seed} epoch {ep}/{epochs} loss {tot/nb:.4f} {times[-1]:.1f}s"
+        if val_gt is not None and (ep % 5 == 0 or ep == 1):
+            with torch.no_grad():
+                full = propagate(adj, emb, layers).cpu().numpy()
+            top = topk(full[: d.n_users], full[d.n_users:], d.train_mask, 20)
+            users = np.flatnonzero(val_gt.any(1))
+            hr = float(np.take_along_axis(val_gt[users], top[users], 1).any(1).mean())
+            msg += f" val HR@20 {hr:.4f}"
+            if hr > best:
+                best, best_state, best_epoch = hr, emb.detach().clone(), ep
+        if ep % 5 == 0 or ep == 1 or args.time_only:
+            print(msg, flush=True)
+
+    stats = {"seed": args.seed, "epochs_run": epochs, "sec_per_epoch": float(np.mean(times)),
+             "total_train_seconds": float(time.perf_counter() - t_start), "n_params": int(emb.numel()),
+             "threads": torch.get_num_threads(), "best_epoch": best_epoch or epochs,
+             "device": torch.cuda.get_device_name(0) if dev.type == "cuda" else "cpu",
+             "peak_gpu_mem_mb": torch.cuda.max_memory_allocated() / 2**20 if dev.type == "cuda" else None}
+    if args.time_only:
+        print(stats)
+        save_json("lightgcn_timing.json", stats)
+        return
+    with torch.no_grad():
+        full = propagate(adj, best_state if best_state is not None else emb, layers).cpu().numpy()
+    ue, ie = full[: d.n_users], full[d.n_users:]
+    np.save(EMB / f"gcn_user_embeddings_seed{args.seed}.npy", ue)
+    np.save(EMB / f"gcn_item_embeddings_seed{args.seed}.npy", ie)
+    r = evaluate(ue, ie, d)
+    stats.update({k: r[k] for k in ("recall@20", "ndcg@20", "tail_recall@20", "tail_ndcg@20", "coverage@20")})
+    print(stats)
+    save_json(f"lightgcn_seed{args.seed}.json", stats)
+
+
+if __name__ == "__main__":
+    main()
