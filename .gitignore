@@ -1,4 +1,6 @@
 .venv/
+# MovieLens-1M raw files are not redistributed here
+Dataset/ml-1m/
 __pycache__/
 experiments/results/bert_fields_partial.npz
 # 64 MB, regenerate with experiments/encode_fields.py

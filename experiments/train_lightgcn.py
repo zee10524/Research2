@@ -11,7 +11,9 @@ checked every 5 epochs); otherwise the model after the last epoch is kept.
 Usage: python train_lightgcn.py --seed 1 --epochs 200 [--time-only 3]
 """
 import argparse
+import json
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -46,7 +48,14 @@ def main():
     ap.add_argument("--time-only", type=int, default=0, help="run N epochs, report timing, save nothing")
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--out", default=None, help="directory for embeddings and metrics (e.g. a Google Drive folder)")
     args = ap.parse_args()
+    out_dir = Path(args.out) if args.out else None
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if not args.time_only and (out_dir / f"lightgcn_seed{args.seed}.json").exists():
+            print(f"seed {args.seed} already finished in {out_dir}, skipping")
+            return
     set_threads(args.threads)
     dev = torch.device(args.device)
     if dev.type == "cuda":
@@ -70,7 +79,7 @@ def main():
         v = pd.read_csv(ROOT / "val_split.csv")
         val_gt = np.zeros_like(d.train_mask)
         val_gt[v.user.values, v.item.values] = True
-    best, best_state, best_epoch = -1.0, None, 0
+    best, best_state, best_epoch, stale = -1.0, None, 0, 0
 
     epochs = args.time_only or args.epochs
     times, t_start = [], time.perf_counter()
@@ -108,11 +117,16 @@ def main():
             hr = float(np.take_along_axis(val_gt[users], top[users], 1).any(1).mean())
             msg += f" val HR@20 {hr:.4f}"
             if hr > best:
-                best, best_state, best_epoch = hr, emb.detach().clone(), ep
+                best, best_state, best_epoch, stale = hr, emb.detach().clone(), ep, 0
+            else:
+                stale += 1
+            if stale >= 30:  # notebook: patience of 30 validation checks
+                print(msg + " | early stop", flush=True)
+                break
         if ep % 5 == 0 or ep == 1 or args.time_only:
             print(msg, flush=True)
 
-    stats = {"seed": args.seed, "epochs_run": epochs, "sec_per_epoch": float(np.mean(times)),
+    stats = {"seed": args.seed, "epochs_run": len(times), "sec_per_epoch": float(np.mean(times)),
              "total_train_seconds": float(time.perf_counter() - t_start), "n_params": int(emb.numel()),
              "threads": torch.get_num_threads(), "best_epoch": best_epoch or epochs,
              "device": torch.cuda.get_device_name(0) if dev.type == "cuda" else "cpu",
@@ -124,12 +138,19 @@ def main():
     with torch.no_grad():
         full = propagate(adj, best_state if best_state is not None else emb, layers).cpu().numpy()
     ue, ie = full[: d.n_users], full[d.n_users:]
-    np.save(EMB / f"gcn_user_embeddings_seed{args.seed}.npy", ue)
-    np.save(EMB / f"gcn_item_embeddings_seed{args.seed}.npy", ie)
     r = evaluate(ue, ie, d)
     stats.update({k: r[k] for k in ("recall@20", "ndcg@20", "tail_recall@20", "tail_ndcg@20", "coverage@20")})
+    stats["early_stopping"] = val_gt is not None
+    stats["best_val_hr@20"] = best if val_gt is not None else None
     print(stats)
-    save_json(f"lightgcn_seed{args.seed}.json", stats)
+    emb_dir = out_dir or EMB
+    np.save(emb_dir / f"gcn_user_embeddings_seed{args.seed}.npy", ue)
+    np.save(emb_dir / f"gcn_item_embeddings_seed{args.seed}.npy", ie)
+    if out_dir is not None:  # written last: its presence marks the seed as finished
+        with open(out_dir / f"lightgcn_seed{args.seed}.json", "w") as f:
+            json.dump(stats, f, indent=2)
+    else:
+        save_json(f"lightgcn_seed{args.seed}.json", stats)
 
 
 if __name__ == "__main__":
