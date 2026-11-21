@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--time-only", type=int, default=0, help="run N epochs, report timing, save nothing")
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--ckpt-every", type=int, default=5)
     ap.add_argument("--out", default=None, help="directory for embeddings and metrics (e.g. a Google Drive folder)")
     args = ap.parse_args()
     out_dir = Path(args.out) if args.out else None
@@ -82,8 +83,20 @@ def main():
     best, best_state, best_epoch, stale = -1.0, None, 0, 0
 
     epochs = args.time_only or args.epochs
-    times, t_start = [], time.perf_counter()
-    for ep in range(1, epochs + 1):
+    times, t_start, first_ep = [], time.perf_counter(), 1
+    # Checkpoint so that a runtime that dies mid-seed (free Colab) resumes instead of restarting.
+    ckpt = out_dir / f"ckpt_seed{args.seed}.pt" if out_dir is not None and not args.time_only else None
+    if ckpt is not None and ckpt.exists():
+        c = torch.load(ckpt, map_location=dev, weights_only=False)
+        with torch.no_grad():
+            emb.copy_(c["emb"])
+        opt.load_state_dict(c["opt"])
+        rng.bit_generator.state = c["rng"]
+        torch.set_rng_state(c["torch_rng"])
+        best, best_state, best_epoch, stale, times = c["best"], c["best_state"], c["best_epoch"], c["stale"], c["times"]
+        first_ep = c["epoch"] + 1
+        print(f"seed {args.seed}: resuming at epoch {first_ep} (best val HR@20 so far {best:.4f} at epoch {best_epoch})", flush=True)
+    for ep in range(first_ep, epochs + 1):
         t0 = time.perf_counter()
         perm = rng.permutation(len(pairs))
         tot, nb = 0.0, max(1, len(pairs) // bs)
@@ -125,9 +138,15 @@ def main():
                 break
         if ep % 5 == 0 or ep == 1 or args.time_only:
             print(msg, flush=True)
+        if ckpt is not None and ep % args.ckpt_every == 0:
+            tmp = ckpt.with_suffix(".tmp")
+            torch.save({"epoch": ep, "emb": emb.detach(), "opt": opt.state_dict(), "rng": rng.bit_generator.state,
+                        "torch_rng": torch.get_rng_state(), "best": best, "best_state": best_state,
+                        "best_epoch": best_epoch, "stale": stale, "times": times}, tmp)
+            tmp.replace(ckpt)
 
     stats = {"seed": args.seed, "epochs_run": len(times), "sec_per_epoch": float(np.mean(times)),
-             "total_train_seconds": float(time.perf_counter() - t_start), "n_params": int(emb.numel()),
+             "total_train_seconds": float(np.sum(times)), "n_params": int(emb.numel()),
              "threads": torch.get_num_threads(), "best_epoch": best_epoch or epochs,
              "device": torch.cuda.get_device_name(0) if dev.type == "cuda" else "cpu",
              "peak_gpu_mem_mb": torch.cuda.max_memory_allocated() / 2**20 if dev.type == "cuda" else None}
@@ -149,6 +168,8 @@ def main():
     if out_dir is not None:  # written last: its presence marks the seed as finished
         with open(out_dir / f"lightgcn_seed{args.seed}.json", "w") as f:
             json.dump(stats, f, indent=2)
+        if ckpt is not None and ckpt.exists():
+            ckpt.unlink()
     else:
         save_json(f"lightgcn_seed{args.seed}.json", stats)
 
