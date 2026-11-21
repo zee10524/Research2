@@ -1,0 +1,18 @@
+{
+  "seed": 4,
+  "epochs_run": 200,
+  "sec_per_epoch": 9.220963186040017,
+  "total_train_seconds": 1844.1926372080034,
+  "n_params": 623744,
+  "threads": 6,
+  "best_epoch": 195,
+  "device": "Tesla T4",
+  "peak_gpu_mem_mb": 147.51025390625,
+  "recall@20": 0.09988259287202074,
+  "ndcg@20": 0.12126922334276784,
+  "tail_recall@20": 0.024606212795625988,
+  "tail_ndcg@20": 0.015187595684856652,
+  "coverage@20": 0.5793308148947652,
+  "early_stopping": true,
+  "best_val_hr@20": 0.6
+}
