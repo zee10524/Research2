@@ -1,0 +1,10 @@
+{
+  "note": "Copied from the Colab cell output (Tesla T4). Fixed 200 epochs, last-epoch model, no early stopping because val_split.csv is missing. Embeddings were not retrieved from the runtime.",
+  "runs": [
+    {"seed": 42, "epochs_run": 200, "sec_per_epoch": 9.184908581570003, "total_train_seconds": 1836.986547959, "peak_gpu_mem_mb": 144.4072265625, "recall@20": 0.09918990950256204, "ndcg@20": 0.12133335997317991, "tail_recall@20": 0.02500859966901377, "tail_ndcg@20": 0.016003140221872283, "coverage@20": 0.5758229897463573},
+    {"seed": 1, "epochs_run": 200, "sec_per_epoch": 9.179313241050025, "total_train_seconds": 1835.8678258279997, "peak_gpu_mem_mb": 144.4072265625, "recall@20": 0.09960418753657534, "ndcg@20": 0.1218139023761122, "tail_recall@20": 0.024296893834589366, "tail_ndcg@20": 0.01582693780829838, "coverage@20": 0.5817593092282785},
+    {"seed": 2, "epochs_run": 200, "sec_per_epoch": 9.172235332789981, "total_train_seconds": 1834.4516825700002, "peak_gpu_mem_mb": 144.4072265625, "recall@20": 0.09951630778840777, "ndcg@20": 0.12111901056906817, "tail_recall@20": 0.023861219247682024, "tail_ndcg@20": 0.015401488192818197, "coverage@20": 0.5801403130059363},
+    {"seed": 3, "epochs_run": 200, "sec_per_epoch": 9.144603305565006, "total_train_seconds": 1828.9256414170004, "peak_gpu_mem_mb": 144.4072265625, "recall@20": 0.09892200289802536, "ndcg@20": 0.12128499419076065, "tail_recall@20": 0.024469806710400128, "tail_ndcg@20": 0.015598628685887652, "coverage@20": 0.5825688073394495},
+    {"seed": 4, "epochs_run": 200, "sec_per_epoch": 9.168554989749996, "total_train_seconds": 1833.717228861, "peak_gpu_mem_mb": 144.4072265625, "recall@20": 0.1000186831608006, "ndcg@20": 0.12129108140053656, "tail_recall@20": 0.02451472913844549, "tail_ndcg@20": 0.015266856317739358, "coverage@20": 0.5817593092282785}
+  ]
+}
