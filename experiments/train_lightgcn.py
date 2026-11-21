@@ -49,6 +49,7 @@ def main():
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--ckpt-every", type=int, default=5)
+    ap.add_argument("--trace-test", action="store_true", help="print test metrics at every validation check")
     ap.add_argument("--out", default=None, help="directory for embeddings and metrics (e.g. a Google Drive folder)")
     args = ap.parse_args()
     out_dir = Path(args.out) if args.out else None
@@ -129,6 +130,9 @@ def main():
             users = np.flatnonzero(val_gt.any(1))
             hr = float(np.take_along_axis(val_gt[users], top[users], 1).any(1).mean())
             msg += f" val HR@20 {hr:.4f}"
+            if args.trace_test:  # diagnostic only, never used for model selection
+                r = evaluate(full[: d.n_users], full[d.n_users:], d)
+                msg += f" | test R@20 {r['recall@20']:.4f} tailR@20 {r['tail_recall@20']:.4f} cov@20 {r['coverage@20']:.3f}"
             if hr > best:
                 best, best_state, best_epoch, stale = hr, emb.detach().clone(), ep, 0
             else:
